@@ -6,7 +6,7 @@ import { Logger, MESSAGES } from "./utils";
 
 const setupServer = async () => {
   try {
-    await databaseSetup();
+    // await databaseSetup();
     Logger.info(MESSAGES.CONNECTED_DATABASE);
   } catch (err) {
     Logger.error(err);
