@@ -1,4 +1,5 @@
 import Web3, { Address, ContractAbi } from 'web3'
+import "dotenv/config";
 
 // Connect to Ethereum node (e.g., Infura)
 const web3: Web3 = new Web3(process.env.INFURA_URL);

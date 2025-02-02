@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { User } from "@prisma/client";
 import { prisma } from "../setup/database.setup";
-import { sentimentHandler } from "@/services/sentiment.service";
+import { sentimentHandler } from "@/utils/sentiment";
 import { errorHandlerWrapper } from "@/utils";
 import { feedbackContract } from "@/utils/web3";
 
