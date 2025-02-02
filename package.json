@@ -1,6 +1,10 @@
 {
   "scripts": {
     "dev": "npx nodemon src/index.ts",
+    "db": "npx prisma migrate dev --name init",
+    "drop": "npx prisma migrate reset",
+    "generate": "npx prisma generate",
+    "deploy": "npx prisma migrate deploy",
     "test": "jest",
     "test:watch": "jest --watch"
   },
