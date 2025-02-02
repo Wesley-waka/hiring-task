@@ -1,7 +1,7 @@
 import Web3, { Address, ContractAbi } from 'web3'
 
 // Connect to Ethereum node (e.g., Infura)
-const web3: Web3 = new Web3('https://sepolia.infura.io/v3/18614d8b7e534f2c80315ca7334420c1');
+const web3: Web3 = new Web3(process.env.INFURA_URL);
 
 // Add your smart contract ABI and address
 const contractABI: ContractAbi = [
@@ -303,7 +303,7 @@ const contractABI: ContractAbi = [
     "type": "function"
   }
 ];
-const contractAddress: Address = '0x042ecb8d07A72C2b044FFa405642Dd72253Ac40c';
+const contractAddress: Address = process.env.CONTRACT_ADDRESS;
 
 // Create contract instance
 const feedbackContract = new web3.eth.Contract(contractABI, contractAddress);
