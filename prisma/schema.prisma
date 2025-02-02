@@ -1,0 +1,49 @@
+// This is your Prisma schema file
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String     @id @default(uuid())
+  name           String     @unique
+  role           String     @default("USER")
+  walletAddress  String?    @unique
+  hashedPassword String
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  feedback       Feedback[]
+
+  @@map("users")
+}
+
+model Feedback {
+  id         Int         @id @default(autoincrement())
+  text       String
+  userName   String
+  createdAt  DateTime    @default(now())
+  sentiments Sentiment[]
+  user       User        @relation(fields: [userName], references: [name])
+
+  @@index([userName])
+  @@map("feedback")
+}
+
+model Sentiment {
+  id         Int      @id @default(autoincrement())
+  score      Float
+  numWords   Int
+  numHits    Int
+  average    Float
+  type       String
+  locale     String
+  vote       String
+  feedback   Feedback @relation(fields: [feedbackId], references: [id])
+  feedbackId Int
+}
