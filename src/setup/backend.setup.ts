@@ -1,34 +1,7 @@
 /** @format */
 
-import express, { Express, Request, Response } from "express";
-import cors from "cors";
-import router from "@/routers";
-import { Logger } from "@/utils";
-import { clientUse } from "valid-ip-scope";
-import {
-  authMiddleware,
-  errorHandlerMiddleware,
-  routeMiddleware,
-} from "@/middlewares";
 
-export const backendSetup = () => {
-  const app: Express = express();
+// @/lib/prisma.ts
+import { PrismaClient } from '@prisma/client';
 
-  app.use(cors());
-  app.use(express.json());
-  app.use(clientUse());
-  app.use(routeMiddleware);
-  app.use("/health", (_req: Request, res: Response) => {
-    res.send("It's healthy!");
-  }); //health check
-
-  app.use("/api", router);
-
-  app.use(errorHandlerMiddleware);
-
-  const port = process.env.PORT || 8000;
-
-  app.listen(port, () => {
-    Logger.info(`Sever is running on ${port}`);
-  });
-};
+export const prisma = new PrismaClient();
