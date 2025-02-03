@@ -46,7 +46,7 @@ const signInHandler = async (req: Request, res: Response) => {
 
   res.status(200).json({
     token: token,
-    isAdmin: user.role === "admin",
+    isAdmin: user.role === "ADMIN",
     username: user.name,
   });
 };
