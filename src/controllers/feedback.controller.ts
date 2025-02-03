@@ -1,9 +1,10 @@
 import { Request, Response } from "express";
 import { User } from "@prisma/client";
 import { prisma } from "../setup/database.setup";
-import { sentimentHandler } from "@/utils/sentiment";
+import { sentimentHandler } from "@/services/sentiment.service";
 import { errorHandlerWrapper } from "@/utils";
 import { feedbackContract } from "@/utils/web3";
+import jwt, { TokenPayload } from 'jsonwebtoken';
 
 // Type Definitions
 export interface SentimentAnalysisResult {
@@ -62,25 +63,48 @@ const submitBlockchainFeedback = async (
   return receipt.transactionHash;
 };
 
-// Controller Handlers
 const createFeedbackHandler = async (
   req: Request<{}, {}, FeedbackRequestBody>,
   res: Response
 ) => {
   const { message, address } = req.body;
-  const { name } = req.query;
+  const authHeader = req.headers.authorization;
 
-  if (!message || !name) {
+  if (!message) {
     return res.status(400).json({
-      error: !message ? "Message is required" : "Name parameter is required"
+      error: "Message is required"
+    });
+  }
+
+  if (!authHeader) {
+    return res.status(401).json({
+      error: "Authorization header is required"
     });
   }
 
   try {
-    const user = await validateUser(String(name));
-    const sentimentAnalysis = await sentimentHandler(message);
+    // Extract the token from the Authorization header
+    const token = authHeader.split(' ')[1]; // Assumes "Bearer <token>" format
+    if (!token) {
+      return res.status(401).json({
+        error: "Invalid authorization header format"
+      });
+    }
 
+    // Decode the token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as TokenPayload;
+    const username = decoded.username;
+
+    if (!username) {
+      return res.status(401).json({
+        error: "Invalid token payload"
+      });
+    }
+
+    const user = await validateUser(username);
+    const sentimentAnalysis = await sentimentHandler(message);
     let transactionHash: string | null = null;
+
     if (address) {
       transactionHash = await submitBlockchainFeedback(
         message,
@@ -106,9 +130,18 @@ const createFeedbackHandler = async (
 
     return res.status(201).json({ feedback, transactionHash });
   } catch (error) {
-    if (error instanceof Error && error.message === "User not found") {
-      return res.status(404).json({ error: error.message });
+    if (error instanceof Error) {
+      if (error.name === 'JsonWebTokenError') {
+        return res.status(401).json({ error: 'Invalid token' });
+      }
+      if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({ error: 'Token expired' });
+      }
+      if (error.message === "User not found") {
+        return res.status(404).json({ error: error.message });
+      }
     }
+
     console.error("Error creating feedback:", error);
     return res.status(500).json({ error: "Failed to submit feedback." });
   }
@@ -116,35 +149,76 @@ const createFeedbackHandler = async (
 
 const getFeedbacksHandler = async (req: Request, res: Response) => {
   const { vote } = req.query;
+  const authHeader = req.headers.authorization;
+  const token = authHeader.split(' ')[1];
+  const decoded = jwt.verify(token, process.env.JWT_SECRET!) as TokenPayload;
+  const walletAddress = decoded.walletAddress;
+  const filteredFeedbacks = [];
 
   try {
-    const feedbackCount: number = await feedbackContract.methods.getFeedbackCount().call();
-    const feedbacks: BlockchainFeedback[] = [];
 
-    const fetchPromises = Array.from({ length: feedbackCount }, async (_, i) => {
-      const feedback: BlockchainFeedback = await feedbackContract.methods.getFeedback(i).call();
+    if (walletAddress) {
+      const feedbackCount: number = await feedbackContract.methods.getFeedbackCount().call();
+      const feedbacks: BlockchainFeedback[] = [];
 
-      if (!vote || feedback.sentiments.some((s) => s.vote === vote)) {
-        const user = await prisma.user.findUnique({
-          where: { walletAddress: feedback.user.toLowerCase() },
-        });
+      const fetchPromises = Array.from({ length: feedbackCount }, async (_, i) => {
+        const feedback: BlockchainFeedback = await feedbackContract.methods.getFeedback(i).call();
 
-        return {
-          text: feedback.text,
-          sentiments: feedback.sentiments,
-          user: feedback.user,
-          userName: user?.name ?? "Unknown",
+        if (!vote || feedback.sentiments.some((s) => s.vote === vote)) {
+          const user = await prisma.user.findUnique({
+            where: { walletAddress: feedback.user.toLowerCase() },
+          });
+
+          return {
+            text: feedback.text,
+            sentiments: feedback.sentiments,
+            user: feedback.user,
+            userName: user?.name ?? "Unknown",
+          };
+        }
+        return null;
+      });
+
+      const results = await Promise.all(fetchPromises);
+      const filteredFeedbacks = results.filter((feedback): feedback is BlockchainFeedback =>
+        feedback !== null
+      );
+
+      return res.status(200).json(filteredFeedbacks);
+    } else {
+      const whereConditions: any = {};
+
+      if (vote) {
+        whereConditions.sentiments = {
+          some: {
+            vote: vote.toString()
+          }
         };
       }
-      return null;
-    });
 
-    const results = await Promise.all(fetchPromises);
-    const filteredFeedbacks = results.filter((feedback): feedback is BlockchainFeedback =>
-      feedback !== null
-    );
+      const filteredFeedbacks = await prisma.feedback.findMany({
+        where: whereConditions,
+        include: {
+          user: {
+            select: {
+              name: true,
+              walletAddress: true
+            }
+          },
+          sentiments: true,
+        },
+        orderBy: {
+          createdAt: 'desc' // Assuming you have a createdAt field
+        }
+      });
 
-    return res.status(200).json(filteredFeedbacks);
+      if (filteredFeedbacks.length === 0) {
+        return res.status(200).json([]);
+      }
+
+      return res.status(200).json(filteredFeedbacks);
+    }
+
   } catch (error) {
     console.error("Error fetching feedbacks:", error);
     return res.status(500).json({ error: "Failed to fetch feedback from the blockchain." });
@@ -152,15 +226,36 @@ const getFeedbacksHandler = async (req: Request, res: Response) => {
 };
 
 const getFeedbacksByNameHandler = async (req: Request, res: Response) => {
-  const { name } = req.query;
+  const authHeader = req.headers.authorization;
 
-  if (!name) {
-    return res.status(400).json({ error: "Name parameter is required" });
+  if (!authHeader) {
+    return res.status(401).json({
+      error: "Authorization header is required"
+    });
   }
 
   try {
-    const user = await validateUser(String(name));
+    // Extract the token from the Authorization header
+    const token = authHeader.split(' ')[1]; // Assumes "Bearer <token>" format
+    if (!token) {
+      return res.status(401).json({
+        error: "Invalid authorization header format"
+      });
+    }
 
+    // Decode the token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as TokenPayload;
+    const username = decoded.username;
+
+    if (!username) {
+      return res.status(401).json({
+        error: "Invalid token payload"
+      });
+    }
+
+    const user = await validateUser(username);
+
+    // Check blockchain feedbacks if user has a wallet address
     if (user.walletAddress) {
       const feedbackCount: number = await feedbackContract.methods.getFeedbackCount().call();
       const feedbacks: BlockchainFeedback[] = [];
@@ -190,20 +285,30 @@ const getFeedbacksByNameHandler = async (req: Request, res: Response) => {
       return res.status(200).json(filteredFeedbacks);
     }
 
+    // If no wallet address, fetch from database
     const feedbacks = await prisma.feedback.findMany({
       where: { userName: user.name },
       include: { sentiments: true },
     });
 
     if (feedbacks.length === 0) {
-      return res.status(404).json({ error: "No feedbacks found for this user" });
+      return res.status(404).json([]);
     }
 
     return res.status(200).json(feedbacks);
   } catch (error) {
-    if (error instanceof Error && error.message === "User not found") {
-      return res.status(404).json({ error: error.message });
+    if (error instanceof Error) {
+      if (error.name === 'JsonWebTokenError') {
+        return res.status(401).json({ error: 'Invalid token' });
+      }
+      if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({ error: 'Token expired' });
+      }
+      if (error.message === "User not found") {
+        return res.status(404).json({ error: error.message });
+      }
     }
+
     console.error("Error fetching feedbacks by name:", error);
     return res.status(500).json({ error: "Failed to fetch feedback." });
   }
