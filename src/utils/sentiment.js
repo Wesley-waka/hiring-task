@@ -1,4 +1,3 @@
-// const { SentimentAnalyzer } = require('node-nlp');
 import { errorHandlerWrapper } from '@/utils';
 import { Request, Response } from 'express';
 import { SentimentAnalyzer } from 'node-nlp';
